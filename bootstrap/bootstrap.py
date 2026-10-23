@@ -21,11 +21,13 @@ analysis. In AWS/Azure this step is replaced by External Secrets.
 import argparse
 import base64
 import os
+import re
 import secrets
 import shutil
 import socket
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -94,13 +96,27 @@ def cluster_exists(cluster):
     return cluster in out.split()
 
 
+def calico_manifest():
+    """The upstream manifest with IPIP set to CrossSubnet.
+
+    All kind nodes sit on one Docker subnet, so no encapsulation is needed. With the default (Always) a NodePort
+    or ClusterIP request that kube-proxy sends from a node to a pod on another node is lost in the IPIP tunnel,
+    which breaks traffic between the two clusters and about half of the host-port ingress requests.
+    """
+    text = urllib.request.urlopen(CALICO_MANIFEST, timeout=60).read().decode()
+    patched, n = re.subn(r'(name: CALICO_IPV4POOL_IPIP\s*\n\s*value: )"Always"', r'\1"CrossSubnet"', text)
+    if n != 1:
+        sys.exit("Calico manifest changed: could not set CALICO_IPV4POOL_IPIP to CrossSubnet")
+    return patched
+
+
 def create_cluster(cluster):
     if cluster_exists(cluster):
         print(f"cluster {cluster} already exists, leaving it alone")
         return
     run("kind", "create", "cluster", "--config", str(CLUSTERS[cluster]["kind_config"]))
     # kind has no CNI here (see the kind configs); Calico provides pod networking and NetworkPolicy
-    kubectl(cluster, "apply", "-f", CALICO_MANIFEST)
+    kubectl(cluster, "apply", "-f", "-", stdin=calico_manifest())
     kubectl(cluster, "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=300s")
 
 
