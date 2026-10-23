@@ -1,7 +1,8 @@
 # upstream Kubernetes ships no ingress controller (k3s bundled traefik), so it is installed here.
 # kind maps host :8080/:8443 to these NodePorts, see bootstrap/kind-config.yaml.
 service:
-  type: NodePort
+  spec:
+    type: NodePort   # chart 42 moved the type under service.spec; without it the service stays LoadBalancer <pending>
 ports:
   web:
     nodePort: 30080
@@ -11,6 +12,9 @@ providers:
   kubernetesIngress:
     publishedService:
       enabled: false
+    # kind has no load balancer. Giving the ingresses an address makes Argo CD report them Healthy instead of Progressing.
+    ingressEndpoint:
+      ip: 127.0.0.1
 resources:
   requests: {cpu: 50m, memory: 64Mi}
   limits: {memory: 128Mi}
