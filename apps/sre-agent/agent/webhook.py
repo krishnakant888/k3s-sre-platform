@@ -1,4 +1,4 @@
-"""Receives Alertmanager webhooks and starts one investigation workflow per firing alert."""
+"""Receives alert webhooks (Grafana alerting, the payload is Alertmanager compatible) and starts one investigation workflow per firing alert."""
 import logging
 
 from fastapi import FastAPI, Request
