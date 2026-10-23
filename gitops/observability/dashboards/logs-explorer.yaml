@@ -436,7 +436,17 @@ data:
             "uid": "loki"
           },
           "fieldConfig": {
-            "defaults": {},
+            "defaults": {
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "blue",
+                    "value": null
+                  }
+                ]
+              }
+            },
             "overrides": []
           },
           "targets": [
