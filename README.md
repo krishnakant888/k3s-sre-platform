@@ -30,7 +30,7 @@ and applies one root Application. The first sync takes about 10 minutes. It prin
 | Grafana | http://grafana.localhost:8080 |
 | Argo Workflows UI | http://workflows.localhost:8080 |
 | Sample API | http://orders.localhost:8080/orders |
-| RCA reports | http://reports.localhost:8080 |
+| RCA reports and feedback UI | http://reports.localhost:8080 |
 
 `*.localhost` resolves to 127.0.0.1 in browsers, no hosts file changes. Tear down with `python3 bootstrap/bootstrap.py --destroy`.
 
@@ -44,7 +44,7 @@ scripts/drill.sh latency     # also: errors, oom, kill, reset
 2. After a few minutes the `OrdersApiErrorBudgetFastBurn` alert fires in Grafana alerting and Grafana calls the agent webhook.
 3. An Argo Workflow `incident-ordersapierrorbudgetfastburn-...` starts (`kubectl -n sre-agent get wf`, or the Argo Workflows UI).
 4. The agent runs a query playbook, classifies the cause, stores the report and logs it:
-   the reports are files on a volume (`<id>/rca.md` and `report.json`): browse them at http://reports.localhost:8080, or `kubectl -n sre-agent exec deploy/rca-viewer -- ls /reports`.
+   the reports are files on a volume (`<id>/rca.md` and `report.json`): read them, and say whether the diagnosis was right and what fixed it, at http://reports.localhost:8080 (the feedback is saved next to each report as `feedback.json`).
 5. Grafana `Platform / SRE agent: investigations` lists the reports. Sample reports for each drill are in [docs/rca-samples](docs/rca-samples).
 
 ## Architecture
@@ -72,7 +72,7 @@ flowchart LR
 | `observability` | Alloy (collector), Mimir (metrics, recording rules), Loki, Tempo, Grafana (dashboards and alerting), kube-state-metrics |
 | `argo-workflows` | Argo Workflows controller and UI (runs the workflows in `sre-agent`) |
 | `demo` | `orders-api` and a load generator |
-| `sre-agent` | alert webhook, workflow template and its step pods, the reports volume (PVC) with a read-only viewer |
+| `sre-agent` | alert webhook, workflow template and its step pods, the reports volume (PVC) and the RCA web UI |
 | `kyverno`, `ingress-nginx`, `kube-system` | policy engine, ingress controller, sealed-secrets controller |
 
 ## Repo layout
@@ -138,7 +138,7 @@ The webhook creates one Workflow per firing alert, named from the alert fingerpr
 - **Local disk (PVCs) instead of S3.** Mimir, Loki and Tempo run single binary with their data on PVCs. That is the production plan for this stage, and the cost is no scale-out. Moving to object storage later is a config change in each tool's storage block. I tried MinIO first and dropped it: its images are no longer pullable.
 - **Mimir monolithic, Loki and Tempo single binary.** Fits a laptop. Production would run them in distributed mode with replication.
 - **Alerting lives in Grafana.** Alert rules, the contact point and the notification policy are ConfigMaps in Git that the Grafana sidecar loads. Mimir only runs the SLO recording rules. One UI for dashboards, alert state and silences, and no separate Alertmanager to operate or keep alive.
-- **Reports on a PVC, not ConfigMaps.** ConfigMaps live in etcd, are capped at 1 MiB and never expire. Reports are plain files on a 2Gi volume with a nightly cleanup job (14 days) and a read-only viewer. With kind that volume is a folder on one node and is lost with the cluster; on EKS or AKS it is a managed disk, or the store step uploads to S3 or Blob. The JSON line in Loki stays the searchable copy.
+- **Reports on a PVC, not ConfigMaps.** ConfigMaps live in etcd, are capped at 1 MiB and never expire. Reports are plain files on a 2Gi volume with a nightly cleanup job (14 days) and a web UI (browse, filter, give feedback). With kind that volume is a folder on one node and is lost with the cluster; on EKS or AKS it is a managed disk, or the store step uploads to S3 or Blob. The JSON line in Loki stays the searchable copy.
 - **Argo Workflows instead of a durable-execution engine.** An investigation is a short linear pipeline, so retries, timeouts and a visible history are enough, and Argo Workflows is Kubernetes-native, managed by GitOps and needs no database. Trade-offs: no durable timers or signals in code (the 20 s settle is a suspend step), and data moves between steps as workflow parameters, capped at about 150 KB (the agent trims evidence to fit). A long-lived or branching process would justify Temporal or Restate.
 - **Secrets seeded at bootstrap.** Sealed Secrets are bound to a cluster key, so secrets committed for my cluster could not be decrypted on yours. Seeding at bootstrap keeps the repo runnable from scratch without putting a private key in Git.
 - **No HPA locally.** metrics-server is disabled to save resources. With it enabled the API gets an HPA on CPU.
